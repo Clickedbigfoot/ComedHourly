@@ -8,6 +8,7 @@
 #include <string.h>
 #include <curl/curl.h>
 #include <ctype.h>
+#include <signal.h>
 
 #define TARGET_URL "https://datasnapshot.pjm.com/content/InstantaneousLoad.aspx"
 #define PJM_INDICATOR "<td>PJM RTO Total</td>\r\n\t\t        <td class=\"right\">"
@@ -15,6 +16,7 @@
 #define COMED_INDICATOR "<td>COMED Zone</td>\r\n\t\t        <td class=\"right\">"
 #define COMED_INDICATOR_LEN strlen(COMED_INDICATOR)
 #define CSV_FILE "usageData.csv"
+static int isRunning;
 
 typedef struct WebChunks {
     char *webData;
@@ -37,17 +39,6 @@ int getSecondsLeft(struct tm *nextEntryTime) {
     nextEntryTime->tm_min += 5 - timeInfo->tm_min % 5;
     mktime(nextEntryTime);
     return secondsTarget - timeInfo->tm_sec;
-}
-
-/**
- * Testing function that simply prints the current time
- **/
-void printTime() {
-    time_t rawtime;
-    struct tm *timeInfo;
-    time(&rawtime);
-    timeInfo = localtime(&rawtime);
-    printf("Time: %s", asctime(timeInfo));
 }
 
 /**
@@ -129,9 +120,8 @@ size_t extractNumber(char *scannee) {
 void writeToCsv(FILE *f, struct tm *timeEntry, int pjmUsage, int comedUsage) {
     char buffer[256];
     buffer[0] = '\0';
-    sprintf(buffer, "%i.%i.%i.%i.%i,%i,%i\n", timeEntry->tm_year + 1990, timeEntry->tm_mon + 1, timeEntry->tm_mday, timeEntry->tm_hour, timeEntry->tm_min, pjmUsage, comedUsage);
+    sprintf(buffer, "%i.%i.%i.%i.%i,%i,%i\n", timeEntry->tm_year + 1900, timeEntry->tm_mon + 1, timeEntry->tm_mday, timeEntry->tm_hour, timeEntry->tm_min, pjmUsage, comedUsage);
     fprintf(f, "%s", buffer);
-    printf("Printed %zu characters to csv\n", strlen(buffer));
 }
 
 /**
@@ -139,10 +129,10 @@ void writeToCsv(FILE *f, struct tm *timeEntry, int pjmUsage, int comedUsage) {
  * @param nextEntryTime: pointer to tm struct determining the intended time for this entry
  **/
 void storeData(struct tm *nextEntryTime) {
-    printf("Entry: %s", asctime(nextEntryTime));
     WebChunks *webpage = getWebPage();
     int pjmUsage = -1;
     int comedUsage = -1;
+    //Extract numbers
     size_t safety = PJM_INDICATOR_LEN > COMED_INDICATOR_LEN ? PJM_INDICATOR_LEN : COMED_INDICATOR_LEN;
     for (int i = 0; i < webpage->size - safety; i++) {
         if (strncmp(webpage->webData + i, PJM_INDICATOR, PJM_INDICATOR_LEN) == 0) {
@@ -156,11 +146,7 @@ void storeData(struct tm *nextEntryTime) {
         printf("Issue: Failed to extract usage statistics\n");
         exit(1);
     }
-    /*write(1, webpage->webData, webpage->size);
-    printf("Pjm usage: %i\n", pjmUsage);
-    printf("Comed usage: %i\n", comedUsage);
-    printf("Size: %zu\n", webpage->size);*/
-    //@TODO write them to a csv file
+    //Write them to a csv file
     FILE *f = fopen(CSV_FILE, "a+");
     if (f == NULL) {
         printf("Issue: Could not open CSV file.");
@@ -173,13 +159,24 @@ void storeData(struct tm *nextEntryTime) {
     free(webpage);
 }
 
+void signalHandler(int sig) {
+    isRunning = 0;
+}
+
 int main(int argc, char **argv) {
+    isRunning = 1;
+    //Set up sigaction
+    struct sigaction sa;
+    sigaction(SIGINT, NULL, &sa); //Load old settings
+    sa.sa_handler = signalHandler;
+    sigaction(SIGINT, &sa, NULL); //Set new ones
+    printf("Note: To shut down program, send SIGINT (Ctrl + c) to the console. Please allow up to five minutes to shut it down due to the app's tendency to sleep between web scrapes.\n");
+    //Set up loop
     struct tm nextEntryTimeStack;
 	struct tm *nextEntryTime = &nextEntryTimeStack;
     getSecondsLeft(nextEntryTime);
-    while (1) {
+    while (isRunning) {
         sleep(getSecondsLeft(nextEntryTime));
-        printTime();
         storeData(nextEntryTime);
     }
 }
