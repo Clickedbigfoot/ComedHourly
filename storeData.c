@@ -1,5 +1,7 @@
 /**
- * This is code for an executable that will periodically save 
+ * This is code for an executable that will periodically save usage data for PJM and Comed electrical grids to a csv file.
+ * Written by Brandon Pokorny (clickedbigfoot@gmail.com)
+ * Compile with the folowing: gcc -lm -Wall storeData.c -o storeData -lcurl
  **/
 #include <stdio.h>
 #include <time.h>
@@ -54,7 +56,7 @@ size_t write_data(void *buffer, size_t size, size_t nmemb, void *userp) {
     size_t realSize = size * nmemb;
     dest->webData = realloc(dest->webData, dest->size + realSize);
     if (dest->webData == NULL) {
-        printf("Issue: realloc failed\n");
+        perror("realloc failed in function write_data: ");
         exit(1);
     }
     memcpy(dest->webData + dest->size, buffer, realSize);
@@ -104,7 +106,7 @@ size_t extractNumber(char *scannee) {
     char *end;
     long num = strtol(buffer, &end, 10);
     if (*end != '\0') {
-        printf("Issue: Incorrect extraction of number.\n");
+        perror("Incorrect extraction of number: ");
         exit(1);
     }
     return (int)num;
@@ -143,13 +145,13 @@ void storeData(struct tm *nextEntryTime) {
         }
     }
     if (pjmUsage == -1 || comedUsage == -1) {
-        printf("Issue: Failed to extract usage statistics\n");
+        perror("Failed to extract usage statistics: ");
         exit(1);
     }
     //Write them to a csv file
     FILE *f = fopen(CSV_FILE, "a+");
     if (f == NULL) {
-        printf("Issue: Could not open CSV file.");
+        perror("Could not open CSV file: ");
         exit(1);
     }
     writeToCsv(f, nextEntryTime, pjmUsage, comedUsage);
