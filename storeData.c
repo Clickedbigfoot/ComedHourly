@@ -172,13 +172,13 @@ int main(int argc, char **argv) {
     sigaction(SIGINT, NULL, &sa); //Load old settings
     sa.sa_handler = signalHandler;
     sigaction(SIGINT, &sa, NULL); //Set new ones
-    printf("Note: To shut down program, send SIGINT (Ctrl + c) to the console. Please allow up to five minutes to shut it down due to the app's tendency to sleep between web scrapes.\n");
+    printf("Note: To shut down program properly, send SIGINT (Ctrl + c) to the console.\n");
     //Set up loop
     struct tm nextEntryTimeStack;
 	struct tm *nextEntryTime = &nextEntryTimeStack;
-    getSecondsLeft(nextEntryTime);
+    sleep(getSecondsLeft(nextEntryTime));
     while (isRunning) {
-        sleep(getSecondsLeft(nextEntryTime));
         storeData(nextEntryTime);
+        sleep(getSecondsLeft(nextEntryTime));
     }
 }
