@@ -13,6 +13,11 @@ namespace CheckUsage
         readonly static string INSTRUCTIONS = "To shut down program, please press Ctrl + c and wait up to five minutes.";
         readonly static int SECONDS_PER_MINUTE = 60;
         readonly static int MS_PER_SECOND = 1000;
+        readonly static string TARGET_URL = @"https://datasnapshot.pjm.com/content/InstantaneousLoad.aspx";
+        readonly static string PJM_INDICATOR = "<td>PJM RTO Total</td>\r\n\t\t        <td class=\"right\">";
+        readonly static string COMED_INDICATOR = "<td>COMED Zone</td>\r\n\t\t        <td class=\"right\">";
+        readonly static string ERROR_PJM_NOT_FOUND = "PJM usage statistic was not found on the website";
+        readonly static string ERROR_COMED_NOT_FOUND = "Comed usage statistic was not found on the website";
         static bool isRunning;
 
         /**
@@ -28,6 +33,58 @@ namespace CheckUsage
             return secondsLeft * MS_PER_SECOND;
         }
 
+        /**
+         * Scrapes the pjm and comed usage statistics from the website
+         * @return an array with usages[0] being the pjm statistic and usages[1] being the comed usage statistic
+         **/
+        public static int[] getStatistics() {
+            int[] usages = new int[2];
+            System.Net.WebClient wc = new System.Net.WebClient();
+            byte[] raw = wc.DownloadData(TARGET_URL);
+            string webData = System.Text.Encoding.UTF8.GetString(raw); //Can condense last few lines with wc.DonwloadString()
+            int idx = webData.IndexOf(PJM_INDICATOR);
+            if (idx < 0) {
+                throw new System.Exception(ERROR_PJM_NOT_FOUND);
+            }
+            int length = webData.IndexOf('<', idx + PJM_INDICATOR.Length) - (idx + PJM_INDICATOR.Length);
+            string temp = webData.Substring(idx + PJM_INDICATOR.Length, length);
+            while (temp.Contains(',')) {
+                temp = temp.Replace(",", "");
+            }
+            usages[0] = System.Int32.Parse(temp);
+            idx = webData.IndexOf(COMED_INDICATOR);
+            if (idx < 0) {
+                throw new System.Exception(ERROR_COMED_NOT_FOUND);
+            }
+            length = webData.IndexOf('<', idx + COMED_INDICATOR.Length) - (idx + COMED_INDICATOR.Length);
+            temp = webData.Substring(idx + COMED_INDICATOR.Length, length);
+            while (temp.Contains(',')) {
+                temp = temp.Replace(",", "");
+            }
+            usages[1] = System.Int32.Parse(temp);
+            return usages;
+        }
+
+        /**
+         * Gathers the pricing data and stores it in a file
+         * @param nextEntryTime: DateTime struct reference determining the intended time for this entry
+         * @param usages: array of the pjm usage statistic and the comed usage statistic, in that order
+         * @return the string to store in the csv file. Should be in format DATE,PJM,COMED
+         **/
+        public static string getEntryText(ref System.DateTime nextEntryTime, int[] usages) {
+            return nextEntryTime.ToString(DATE_FORMAT) + "," + usages[0].ToString()+  "," + usages[1].ToString() + "\n";
+        }
+
+        /**
+         * Gathers the pricing data and stores it in a file
+         * @param nextEntryTime: DateTime struct reference determining the intended time for this entry
+         **/
+        public static void storeData(ref System.DateTime nextEntryTime) {
+            int[] values = getStatistics();
+            string entryText = getEntryText(ref nextEntryTime, values);
+            //@TODO store entryText into a csv file
+        }
+
         static void Main(string[] args)
         {
             isRunning = true;
@@ -37,12 +94,16 @@ namespace CheckUsage
             };
             System.Console.WriteLine(INSTRUCTIONS);
             System.DateTime nextEntry = System.DateTime.Now;
-            System.Threading.Thread.Sleep(getMillisecondsLeft(ref nextEntry));
+            //Start testing block
+            getMillisecondsLeft(ref nextEntry);
+            storeData(ref nextEntry);
+            //End testing block
+            /*System.Threading.Thread.Sleep(getMillisecondsLeft(ref nextEntry));
             while (isRunning) {
-                System.Console.WriteLine("Local date and time is {0}", nextEntry.ToString(DATE_FORMAT));
+                storeData(ref nextEntry);
                 System.Threading.Thread.Sleep(getMillisecondsLeft(ref nextEntry));
             }
-            System.Console.WriteLine("Exiting program");
+            System.Console.WriteLine("Exiting program");*/
         }
     }
 }
