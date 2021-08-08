@@ -18,6 +18,8 @@ namespace CheckUsage
         readonly static string COMED_INDICATOR = "<td>COMED Zone</td>\r\n\t\t        <td class=\"right\">";
         readonly static string ERROR_PJM_NOT_FOUND = "PJM usage statistic was not found on the website";
         readonly static string ERROR_COMED_NOT_FOUND = "Comed usage statistic was not found on the website";
+        readonly static string CSV_FILE = "usageData.csv";
+        readonly static string CSV_HEADER = "year.month.day.hour.min,pjmUsage,comedUsage\n";
         static bool isRunning;
 
         /**
@@ -82,7 +84,7 @@ namespace CheckUsage
         public static void storeData(ref System.DateTime nextEntryTime) {
             int[] values = getStatistics();
             string entryText = getEntryText(ref nextEntryTime, values);
-            //@TODO store entryText into a csv file
+            System.IO.File.AppendAllText(CSV_FILE, entryText);
         }
 
         static void Main(string[] args)
@@ -93,17 +95,16 @@ namespace CheckUsage
                 Program.isRunning = false;
             };
             System.Console.WriteLine(INSTRUCTIONS);
+            if (!System.IO.File.Exists(CSV_FILE)) {
+                System.IO.File.WriteAllText(CSV_FILE, CSV_HEADER); //Creates file and writes header
+            }
             System.DateTime nextEntry = System.DateTime.Now;
-            //Start testing block
-            getMillisecondsLeft(ref nextEntry);
-            storeData(ref nextEntry);
-            //End testing block
-            /*System.Threading.Thread.Sleep(getMillisecondsLeft(ref nextEntry));
+            System.Threading.Thread.Sleep(getMillisecondsLeft(ref nextEntry));
             while (isRunning) {
                 storeData(ref nextEntry);
                 System.Threading.Thread.Sleep(getMillisecondsLeft(ref nextEntry));
             }
-            System.Console.WriteLine("Exiting program");*/
+            System.Console.WriteLine("Exiting program");
         }
     }
 }
