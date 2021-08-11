@@ -20,9 +20,9 @@ namespace CheckUsage
         readonly static string ERROR_COMED_NOT_FOUND = "Comed usage statistic was not found on the website";
         readonly static string CSV_FILE = "usageData.csv";
         readonly static string CSV_HEADER = "year.month.day.hour.min,pjmUsage,comedUsage\n";
-        //readonly static string CONFIG_FILE = "config.txt";
+        readonly static string CONFIG_FILE = "config.txt";
         static bool isRunning;
-        static bool
+        static int customInterval;
 
         /**
          * Determines the milliseconds left until the next entry and also determines what that time will be
@@ -31,6 +31,11 @@ namespace CheckUsage
          **/
         public static int getMillisecondsLeft(ref System.DateTime nextEntry) {
             nextEntry = System.DateTime.Now; //Reset calculation for accuracy
+            if (customInterval < 1) {
+                //Config file specifies a time interval for each entry
+                nextEntry = nextEntry.AddSeconds(customInterval);
+                return customInterval * MS_PER_SECOND;
+            }
             int secondsLeft = (5 - (nextEntry.Minute % 5)) * SECONDS_PER_MINUTE - nextEntry.Second;
             nextEntry = nextEntry.AddSeconds(-nextEntry.Second);
             nextEntry = nextEntry.AddMinutes(5 - (nextEntry.Minute % 5));
@@ -96,6 +101,20 @@ namespace CheckUsage
                 e.Cancel = true;
                 Program.isRunning = false;
             };
+            if (System.IO.File.Exists(CONFIG_FILE)) {
+                string customIntervalStr = System.IO.File.ReadAllText(CONFIG_FILE).Trim();
+                if (customIntervalStr.Length < 1) {
+                    customIntervalStr = "-1";
+                }
+                while (customIntervalStr.Contains(",")) {
+                    customIntervalStr = customIntervalStr.Replace(",", "");
+                }
+                customInterval = (int)(float.Parse(customIntervalStr));
+                System.Console.WriteLine("Custom Time Interval: {0} seconds", customInterval);
+            }
+            else {
+                customInterval = -1;
+            }
             System.Console.WriteLine(INSTRUCTIONS);
             if (!System.IO.File.Exists(CSV_FILE)) {
                 System.IO.File.WriteAllText(CSV_FILE, CSV_HEADER); //Creates file and writes header
