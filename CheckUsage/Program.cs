@@ -43,7 +43,7 @@ namespace CheckUsage
             int[] usages = new int[2];
             System.Net.WebClient wc = new System.Net.WebClient();
             byte[] raw = wc.DownloadData(TARGET_URL);
-            string webData = System.Text.Encoding.UTF8.GetString(raw); //Can condense last few lines with wc.DonwloadString()
+            string webData = System.Text.Encoding.UTF8.GetString(raw); //Can condense last few lines with wc.DownloadString()
             int idx = webData.IndexOf(PJM_INDICATOR);
             if (idx < 0) {
                 throw new System.Exception(ERROR_PJM_NOT_FOUND);
@@ -102,6 +102,19 @@ namespace CheckUsage
             System.Threading.Thread.Sleep(getMillisecondsLeft(ref nextEntry));
             while (isRunning) {
                 storeData(ref nextEntry);
+                try {
+                    storeData(ref nextEntry);
+                }
+                catch (Exception e) {
+                    System.Console.WriteLine("{0} exception caught for entry {1}. Trying again in one minute.", e, nextEntry.ToString(DATE_FORMAT));
+                    System.Threading.Thread.Sleep(SECONDS_PER_MINUTE * MS_PER_SECOND);
+                    try {
+                        storeData(ref nextEntry);
+                    }
+                    catch (Exception e2) {
+                        System.Console.WriteLine("{0} exception caught for entry {1}. Skipping current time slot.", e2, nextEntry.ToString(DATE_FORMAT));
+                    }
+                }
                 System.Threading.Thread.Sleep(getMillisecondsLeft(ref nextEntry));
             }
             System.Console.WriteLine("Exiting program");
