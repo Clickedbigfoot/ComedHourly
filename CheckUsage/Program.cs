@@ -20,7 +20,9 @@ namespace CheckUsage
         readonly static string ERROR_COMED_NOT_FOUND = "Comed usage statistic was not found on the website";
         readonly static string CSV_FILE = "usageData.csv";
         readonly static string CSV_HEADER = "year.month.day.hour.min,pjmUsage,comedUsage\n";
+        //readonly static string CONFIG_FILE = "config.txt";
         static bool isRunning;
+        static bool
 
         /**
          * Determines the milliseconds left until the next entry and also determines what that time will be
@@ -32,7 +34,7 @@ namespace CheckUsage
             int secondsLeft = (5 - (nextEntry.Minute % 5)) * SECONDS_PER_MINUTE - nextEntry.Second;
             nextEntry = nextEntry.AddSeconds(-nextEntry.Second);
             nextEntry = nextEntry.AddMinutes(5 - (nextEntry.Minute % 5));
-            return secondsLeft * MS_PER_SECOND;
+            return (secondsLeft + 3) * MS_PER_SECOND; //Add 3 seconds to ensure that this doesn't calculate 0 seconds the next time it's called
         }
 
         /**
@@ -74,7 +76,7 @@ namespace CheckUsage
          * @return the string to store in the csv file. Should be in format DATE,PJM,COMED
          **/
         public static string getEntryText(ref System.DateTime nextEntryTime, int[] usages) {
-            return nextEntryTime.ToString(DATE_FORMAT) + "," + usages[0].ToString()+  "," + usages[1].ToString() + "\n";
+            return nextEntryTime.ToString(DATE_FORMAT) + "," + usages[0].ToString()+  "," + usages[1].ToString() + "\r\n";
         }
 
         /**
