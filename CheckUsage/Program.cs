@@ -101,7 +101,6 @@ namespace CheckUsage
             System.DateTime nextEntry = System.DateTime.Now;
             System.Threading.Thread.Sleep(getMillisecondsLeft(ref nextEntry));
             while (isRunning) {
-                storeData(ref nextEntry);
                 try {
                     storeData(ref nextEntry);
                 }
@@ -109,10 +108,17 @@ namespace CheckUsage
                     System.Console.WriteLine("{0} exception caught for entry {1}. Trying again in one minute.", e, nextEntry.ToString(DATE_FORMAT));
                     System.Threading.Thread.Sleep(SECONDS_PER_MINUTE * MS_PER_SECOND);
                     try {
-                        storeData(ref nextEntry);
+                        storeData(ref nextEntry); //Try 2
                     }
                     catch (System.Exception e2) {
-                        System.Console.WriteLine("{0} exception caught for entry {1}. Skipping current time slot.", e2, nextEntry.ToString(DATE_FORMAT));
+                        System.Console.WriteLine("{0} exception caught for entry {1}. Trying again in one minute.", e2, nextEntry.ToString(DATE_FORMAT));
+                        System.Threading.Thread.Sleep(SECONDS_PER_MINUTE * MS_PER_SECOND);
+                        try {
+                            storeData(ref nextEntry); //Try 3
+                        }
+                        catch (System.Exception e3) {
+                            System.Console.WriteLine("{0} exception caught for entry {1}. Skipping timeslot.", e3, nextEntry.ToString(DATE_FORMAT));
+                        }
                     }
                 }
                 System.Threading.Thread.Sleep(getMillisecondsLeft(ref nextEntry));
