@@ -31,7 +31,7 @@ namespace CheckUsage
          **/
         public static int getMillisecondsLeft(ref System.DateTime nextEntry) {
             nextEntry = System.DateTime.Now; //Reset calculation for accuracy
-            if (customInterval < 1) {
+            if (customInterval > 0) {
                 //Config file specifies a time interval for each entry
                 nextEntry = nextEntry.AddSeconds(customInterval);
                 return customInterval * MS_PER_SECOND;
