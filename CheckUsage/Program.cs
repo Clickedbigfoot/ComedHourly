@@ -105,13 +105,13 @@ namespace CheckUsage
                 try {
                     storeData(ref nextEntry);
                 }
-                catch (Exception e) {
+                catch (System.Exception e) {
                     System.Console.WriteLine("{0} exception caught for entry {1}. Trying again in one minute.", e, nextEntry.ToString(DATE_FORMAT));
                     System.Threading.Thread.Sleep(SECONDS_PER_MINUTE * MS_PER_SECOND);
                     try {
                         storeData(ref nextEntry);
                     }
-                    catch (Exception e2) {
+                    catch (System.Exception e2) {
                         System.Console.WriteLine("{0} exception caught for entry {1}. Skipping current time slot.", e2, nextEntry.ToString(DATE_FORMAT));
                     }
                 }
