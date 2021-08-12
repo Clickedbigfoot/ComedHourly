@@ -126,19 +126,19 @@ namespace CheckUsage
                     storeData(ref nextEntry);
                 }
                 catch (System.Exception e) {
-                    System.Console.WriteLine("{0} exception caught for entry {1}. Trying again in one minute.", e, nextEntry.ToString(DATE_FORMAT));
+                    System.Console.WriteLine("{0} exception caught for entry {1}. Trying again in one minute.", e.GetType().Name, nextEntry.ToString(DATE_FORMAT));
                     System.Threading.Thread.Sleep(SECONDS_PER_MINUTE * MS_PER_SECOND);
                     try {
                         storeData(ref nextEntry); //Try 2
                     }
                     catch (System.Exception e2) {
-                        System.Console.WriteLine("{0} exception caught for entry {1}. Trying again in one minute.", e2, nextEntry.ToString(DATE_FORMAT));
+                        System.Console.WriteLine("{0} exception caught for entry {1}. Trying again in one minute.", e2.GetType().Name, nextEntry.ToString(DATE_FORMAT));
                         System.Threading.Thread.Sleep(SECONDS_PER_MINUTE * MS_PER_SECOND);
                         try {
                             storeData(ref nextEntry); //Try 3
                         }
                         catch (System.Exception e3) {
-                            System.Console.WriteLine("{0} exception caught for entry {1}. Skipping timeslot.", e3, nextEntry.ToString(DATE_FORMAT));
+                            System.Console.WriteLine("{0} exception caught for entry {1}. Skipping timeslot.", e3.GetType().Name, nextEntry.ToString(DATE_FORMAT));
                         }
                     }
                 }
