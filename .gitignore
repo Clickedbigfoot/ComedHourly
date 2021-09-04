@@ -1,4 +1,6 @@
 CheckUsage/bin/
 CheckUsage/obj/
 CheckUsage/config.txt
+CheckUsage/*.exe
+CheckUsage/*.pdb
 usageData.csv
