@@ -2,15 +2,16 @@
 # This file defines the class for a naive machine learning model
 # It calculates the ideal threshold for predicting if a peak is coming
 # within the next hour based on the rate of change in the electricity usage
-import numpy as np
 import argparse
-from datetime import datetime, date, timedelta, time
-from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.svm import SVC
-from sklearn.metrics import recall_score, precision_score
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from datetime import date, datetime, time, timedelta
+
 from matplotlib import pyplot as plt
+import numpy as np
+from sklearn.metrics import recall_score, precision_score
+from sklearn.model_selection import GridSearchCV, train_test_split
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
 
 SEED = 343
 SECONDS_PER_HOUR = 60 * 60
