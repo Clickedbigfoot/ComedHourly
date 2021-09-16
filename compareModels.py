@@ -22,106 +22,17 @@ comedScaler = None
 # Scalers trained to standardize unprocessed data
 pjmStandardizer = None
 comedStandardizer = None
-# Scalers trained to normalize standardized data
-pjmNormalizer = None
-comedNormalizer = None
 # Keep track of all the best parameter results
 results = {}
 
-
-class NaiveMl():
-    def __init__(self, threshold=1):
-        self.threshold = threshold
-
-    def train(self, trainData, nEpochs=1, increment=1, batchSize=5,
-              mmtmInitial=1, mmtmIncrement=0.5):
-        """
-        Trains this model on the training data
-        @param trainData: a numpy array of shape
-                          (nSamples, 2)
-                          with the 2 comprising of the rate of change
-                          and the ground truth
-        @param nEpochs: number of epochs to train the model
-        @param increment: the default value by which the threshold is
-                          increased or decreased
-        @param batchSize: size of batches to process before changing the
-                          threshold. Hopefully prevents thrashing
-        """
-        momentum = mmtmInitial
-        loweredLast = False     # Whether or not the threshold was lowered on
-        # the last successful adjustment
-        for epoch in range(0, nEpochs):
-            i = 0
-            nFP = 0     # Number of false positives
-            nFN = 0     # Number of false negatives
-            for rateOfChange, ground in trainData:
-                if self.predict(rateOfChange):
-                    # Predict that a peak is close
-                    if not ground:
-                        nFP += 1
-                else:
-                    # Predict that a peak is not close
-                    if ground:
-                        nFN += 1
-
-                # Adjust the threshold
-                if i % batchSize == 0:
-                    if nFN + nFP > batchSize / 2:
-                        if nFN >= nFP:
-                            # Prioritize recall
-                            if loweredLast:
-                                momentum = mmtmInitial
-                                loweredLast = False
-                            else:
-                                momentum += mmtmIncrement
-                            self.threshold += increment * momentum
-                        else:
-                            if loweredLast:
-                                momentum += mmtmIncrement
-                            else:
-                                momentum = mmtmInitial
-                                loweredLast = True
-                            self.threshold -= increment * momentum
-                    i = 0   # Reset to maintain accuracy
-                    nFN = 0
-                    nFP = 0
-                else:
-                    i += 1
-
-            # Run leftovers of samples in epoch
-            if nFN + nFP > i / 2:
-                if nFN >= nFP:
-                    # Prioritize recall
-                    if loweredLast:
-                        momentum = mmtmInitial
-                        loweredLast = False
-                    else:
-                        momentum += mmtmIncrement
-                    self.threshold += increment * momentum
-                else:
-                    if loweredLast:
-                        momentum += mmtmIncrement
-                    else:
-                        momentum = mmtmInitial
-                        loweredLast = True
-                    self.threshold -= increment * momentum
-
-    def predict(self, rateOfChange):
-        """
-        Makes a prediction based on the input data
-        @param features: int describing the rate of change
-        @return a 1 if there is a peak in the next hour or 0 otherwise
-        """
-        return int(0 < rateOfChange and rateOfChange <= self.threshold)
-
 def getParamString(parameters):
-    names = list(parameters.keys())
+    # Creates string for listing model parameters
     result = ""
-    for name in names:
+    for name in list(parameters.keys()):
         if name == "random_state":
             continue
         result = result + name + ":" + str(parameters[name]) + "\n"
-    return result
+    return result[:-1]
 
 def getDatetimeFromTimestamp(timestamp):
     """
@@ -337,10 +248,6 @@ def trainScalers(pjmFeatures, comedFeatures):
     global comedStandardizer
     pjmStandardizer = StandardScaler().fit(pjmFeatures)
     comedStandardizer = StandardScaler().fit(comedFeatures)
-    global pjmNormalizer
-    global comedNormalizer
-    pjmNormalizer = MinMaxScaler().fit(pjmStandardizer.transform(pjmFeatures))
-    comedNormalizer = MinMaxScaler().fit(comedStandardizer.transform(comedFeatures))
 
 def getSamples1(samples, peaks):
     """
@@ -540,7 +447,7 @@ def runDtreeTests(pjmTrain, pjmTest, comedTrain, comedTest):
     comedScore = getModelScore("dtree", comedBestParam, "recall", comedTrain, comedTest)
     results["dtree"] = [[pjmBestParam, pjmScore], [comedBestParam, comedScore]]
 
-def runSvcTests(pjmTrain, pjmTest, comedTrain, comedTest):
+def runSvcTests(pjmTrain, pjmTest, comedTrain, comedTest, standardize):
     # Gamma determines how closely it should fit the data
     # with a nonlinear kernel
     gamma = [0.1, 1, 10, 40, 70, 90, 110]
@@ -549,12 +456,12 @@ def runSvcTests(pjmTrain, pjmTest, comedTrain, comedTest):
     c = [0.1, 1, 10, 40, 70, 90, 110]
 
     # Further preprocess the data
-    pjmTrain, pjmTest = scaleData(pjmScaler, pjmTrain, pjmTest)
-    #pjmTrain, pjmTest = scaleData(pjmStandardizer, pjmTrain, pjmTest)
-    #pjmTrain, pjmTest = scaleData(pjmScaler, pjmTrain, pjmTest)
-    comedTrain, comedTest = scaleData(comedScaler, comedTrain, comedTest)
-    #comedTrain, comedTest = scaleData(comedStandardizer, comedTrain, comedTest)
-    #comedTrain, comedTest = scaleData(comedScaler, comedTrain, comedTest)
+    if standardize:
+        pjmTrain, pjmTest = scaleData(pjmStandardizer, pjmTrain, pjmTest)
+        comedTrain, comedTest = scaleData(comedStandardizer, comedTrain, comedTest)
+    else:
+        pjmTrain, pjmTest = scaleData(pjmScaler, pjmTrain, pjmTest)
+        comedTrain, comedTest = scaleData(comedScaler, comedTrain, comedTest)
 
     # Test rbf kernel
     svcParameters = {"kernel":["rbf"], "C":c, "gamma":gamma, "random_state":[SEED]}
@@ -569,11 +476,11 @@ if __name__ == "__main__":
                                                   of various machine learning models.")
     parser.add_argument('-i', dest='input', type=str, default="./usageData.csv", help="Path to the data to use.")
     parser.add_argument('-t', dest='dataSplit', type=float, default=0.9, help="Percentage of data to be used as test data. Default=0.9")
-    parser.add_argument('-m', dest='mode', type=int, default=1, help="Mode for choosing features. Default=1")
+    parser.add_argument('-m', dest='mode', type=int, default=2, help="Mode for choosing features. Default=2")
     parser.add_argument('-v', action="store_true", dest='visual', help="Visualize the results with matplotlib.")
-    parser.add_argument('-n', action="store_true", dest='naive', help="Use the naive machine learning model.")
     parser.add_argument('-d', action="store_true", dest='dtree', help="Use a decision tree.")
     parser.add_argument('-s', action="store_true", dest='svc', help="Use an SVC.")
+    parser.add_argument('-n', action="store_true", dest='standardize', help="Standardize the data for SVC instead of normalize.")
     args = parser.parse_args()
     if args.mode != 1 and args.mode != 2:
         raise ValueError("Invalid choice of mode for choosing features")
@@ -581,7 +488,7 @@ if __name__ == "__main__":
     if args.dtree:
         runDtreeTests(pjmTrain, pjmTest, comedTrain, comedTest)
     if args.svc:
-        runSvcTests(pjmTrain, pjmTest, comedTrain, comedTest)
+        runSvcTests(pjmTrain, pjmTest, comedTrain, comedTest, args.standardize)
     
     # Print and plot reults
     if args.dtree:
@@ -594,15 +501,15 @@ if __name__ == "__main__":
         print("Recall: " + str(comedBest[1][0]) + "\tPrecision: " + str(comedBest[1][1]))
         if args.visual:
             fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(6, 6))
-            fig.suptitle("Feature Selection Mode " + str(args.mode))
-            scores = ["Recall", "Precision"]
+            pjmScores = ["Recall\n" + str(pjmBest[1][0]), "Precision\n" + str(pjmBest[1][1])]
             ax[0].title.set_text("PJM Decision Tree")
             ax[0].set_ylim([0, 1.0])
-            ax[0].bar(scores, pjmBest[1])
+            ax[0].bar(pjmScores, pjmBest[1])
             ax[0].set_xlabel(getParamString(pjmBest[0]))
+            comedScores = ["Recall\n" + str(comedBest[1][0]), "Precision\n" + str(comedBest[1][1])]
             ax[1].title.set_text("Comed Decision Tree")
             ax[1].set_ylim([0, 1.0])
-            ax[1].bar(scores, comedBest[1])
+            ax[1].bar(comedScores, comedBest[1])
             ax[1].set_xlabel(getParamString(comedBest[0]))
             plt.tight_layout(pad=1.0)
             plt.savefig("dtree.pdf")
@@ -617,15 +524,19 @@ if __name__ == "__main__":
         print("Recall: " + str(comedBest[1][0]) + "\tPrecision: " + str(comedBest[1][1]))
         if args.visual:
             fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(6, 6))
-            fig.suptitle("Feature Selection Mode " + str(args.mode))
-            scores = ["Recall", "Precision"]
+            if args.standardize:
+                fig.suptitle("Standardized Data")
+            else:
+                fig.suptitle("Normalized Data")
+            pjmScores = ["Recall\n" + str(pjmBest[1][0]), "Precision\n" + str(pjmBest[1][1])]
             ax[0].title.set_text("PJM SVC")
             ax[0].set_ylim([0, 1.0])
-            ax[0].bar(scores, pjmBest[1])
+            ax[0].bar(pjmScores, pjmBest[1])
             ax[0].set_xlabel(getParamString(pjmBest[0]))
+            comedScores = ["Recall\n" + str(comedBest[1][0]), "Precision\n" + str(comedBest[1][1])]
             ax[1].title.set_text("Comed SVC")
             ax[1].set_ylim([0, 1.0])
-            ax[1].bar(scores, comedBest[1])
+            ax[1].bar(comedScores, comedBest[1])
             ax[1].set_xlabel(getParamString(comedBest[0]))
             plt.tight_layout(pad=1.0)
             plt.savefig("svc.pdf")
