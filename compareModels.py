@@ -1,7 +1,10 @@
 #!/usr/bin/python
-# This file defines the class for a naive machine learning model
-# It calculates the ideal threshold for predicting if a peak is coming
-# within the next hour based on the rate of change in the electricity usage
+"""
+Compares different classifier models that predict whether
+or not a peak will occur within 60 minutes. This makes it
+easier to train regressor models for calculating the specific
+time at which the peak will come
+"""
 import argparse
 from datetime import date, datetime, time, timedelta
 
