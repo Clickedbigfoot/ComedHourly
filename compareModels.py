@@ -52,37 +52,36 @@ def getDatetimeFromTimestamp(timestamp):
                     minute=times[4])
 
 
-def isDesiredLater(minus15, minus10, minus5, current, deltas):
-    # Determines if the timestamps are properly spaced apart in terms of time
-    # @return True if they are spaced properly
-    # False otherwise
-    if (
-        current[0] - minus15[0] != deltas[15]
-        or current[0] - minus10[0] != deltas[10]
-        or current[0] - minus5[0] != deltas[5]
-    ):
-        return False
-    return True
-
-
-def getEarlierTime(samples, i, delta):
-    """
-    Finds the sample that is the required minutes prior
-    to sample i.
-    @param samples: list of samples
-    @param i: index of the current sample
-    @param delta: timedelta object of target difference
-    @return desired sample from samples if it exists, otherwise None
-    """
+def getAverageLoad(samples, i, deltaMinutes, span, grid):
+    # Based on the sample deltaMinutes before the sample at i,
+    # Determine the average load over the span for the specified grid
+    if grid == "pjm" or grid == 1:
+        grid = 1
+    elif grid == "comed" or grid == 2:
+        grid = 2
+    else:
+        raise ValueError(f"Invalid grid argument '{grid}'")
+    delta = timedelta(minutes=deltaMinutes)
     current = samples[i]
     target = current[0] - delta
-    for j in range(i - 1, -1, -1):
+    for j in range(i, -1, -1):
         previous = samples[j]
         if previous[0] < target:
-            # Too far back, it doesn't exist
             return None
         if previous[0] == target:
-            return previous
+            # Found the sample at which we want a rate of change
+            current = previous
+            totalLoad = current[grid]
+            nLoads = 1
+            delta = timedelta(minutes=span)
+            target = current[0] - delta
+            for k in range(j - 1, -1, -1):
+                previous = samples[k]
+                if previous[0] < target:
+                    break
+                totalLoad += previous[grid]
+                nLoads += 1
+            return totalLoad / nLoads
     return None
 
 
@@ -102,7 +101,7 @@ def getRateOfChange(samples, i, deltaMinutes, span, grid):
     elif grid == "comed":
         grid = 2
     else:
-        raise ValueError("Invalid grid argument")
+        raise ValueError(f"Invalid grid argument '{grid}'")
     delta = timedelta(minutes=deltaMinutes)
     current = samples[i]
     target = current[0] - delta
@@ -113,6 +112,7 @@ def getRateOfChange(samples, i, deltaMinutes, span, grid):
         if previous[0] == target:
             # Found the sample at which we want a rate of change
             current = previous
+            avgLoad1 = getAverageLoad(samples, j, 0, 20, grid)
             delta = timedelta(minutes=span)
             target = current[0] - delta
             for k in range(j - 1, -1, -1):
@@ -120,41 +120,9 @@ def getRateOfChange(samples, i, deltaMinutes, span, grid):
                 if previous[0] < target:
                     return None
                 if previous[0] == target:
-                    return (current[grid] - previous[grid]) / span
+                    avgLoad2 = getAverageLoad(samples, k, 0, 20, grid)
+                    return (avgLoad1 - avgLoad2) / span
             return None
-    return None
-
-
-def getSecondRateOfChange(samples, i, deltaMinutes, span, spanRoc, grid):
-    """
-    Determines the rate of change in the rate of change at sample
-    deltaMinutes before sample i
-    @param samples: the list of samples
-    @param i: index in samples for the current time
-    @param deltaMinutes: minutes prior to sample i that we want to calculate
-    the roc of the roc
-    @param span: duration in minutes for calculating the roc of roc\
-    @param span: span fo getRateOfChange function
-    @param grid: "pjm" or "comed"
-    @return the rate of change in rate of change per minute
-    or None if there is no valid rate
-    """
-    delta = timedelta(minutes=deltaMinutes)
-    current = samples[i]
-    target = current[0] - delta
-    for j in range(i, -1, -1):
-        previous = samples[j]
-        if previous[0] < target:
-            return None
-        if previous[0] == target:
-            # Found the sample at which we want a rate of change
-            roc1 = getRateOfChange(samples, j, 0, spanRoc, grid)
-            if roc1 is None:
-                return None
-            roc2 = getRateOfChange(samples, j, span, spanRoc, grid)
-            if roc2 is None:
-                return None
-            return (roc1 - roc2) / span
     return None
 
 
@@ -169,7 +137,8 @@ def isPositive(currentTimestamp, peaks, grid):
     elif grid == "comed":
         peakTime = peaks[currentTimestamp.date()][1]
     else:
-        raise ValueError("Invalid electricity grid specified in arguments")
+        raise ValueError(f"Invalid electricity grid '{grid}' \
+                         specified in arguments")
     peakTime = datetime.combine(currentTimestamp.date(), peakTime)
     if peakTime < currentTimestamp:
         return 0
@@ -273,80 +242,23 @@ def trainScalers(pjmFeatures, comedFeatures):
     comedStandardizer = StandardScaler().fit(comedFeatures)
 
 
-def getSamples1(samples, peaks):
-    """
-    We want features to be the capacity loads at the current,
-    5 minutes, 10 minutes, and 15 minutes prior times.
-    Labels are whether or not a peak occurs within sixty minutes.
-    We need two separate arrays of training data as described above,
-    one for predicting PJM peaks and one for predicting Comed peaks.
-    @return pjmFeatures, pjmLabels, comedFeatures, comedLabels
-    """
-    i = 0
-    pjm = []
-    pjmLabels = []
-    comed = []
-    comedLabels = []
-    deltas = {
-        5: timedelta(minutes=5),
-        10: timedelta(minutes=10),
-        15: timedelta(minutes=15),
-        30: timedelta(minutes=30),
-    }
-    while i < len(samples) - 3:
-        # Set i to a proper value first
-        current = samples[i + 3]
-        minus5 = samples[i + 2]
-        minus10 = samples[i + 1]
-        minus15 = samples[i]
-        if not isDesiredLater(minus15, minus10, minus5, current, deltas):
-            i += 1
-            continue
-        # Create samples with their label
-        pjmSample = [current[1], minus5[1], minus10[1], minus15[1]]
-        pjmLabels.append([isPositive(current[0], peaks, "pjm")])
-        comedSample = [current[2], minus5[2], minus10[2], minus15[2]]
-        comedLabels.append([isPositive(current[0], peaks, "comed")])
-        pjm.append(pjmSample)
-        comed.append(comedSample)
-        i += 1
-    pjm = np.array(pjm)
-    comed = np.array(comed)
-    return pjm, pjmLabels, comed, comedLabels
-
-
-def getFeatures2(samples, current, i, grid):
+def getFeatures(samples, current, i, grid):
     """
     Returns a list of the features for sample i
     Return None if there is no valid set of features for this sample
     """
-    # Add the raw load at the moment
-    roc0 = current[1] if grid == "pjm" else current[2]
-    # Add rate of change over last 60 minutes
-    roc1 = getRateOfChange(samples, i, 0, 60, grid)
-    if roc1 is None:
-        return None
-    # Add rate of change over last 60 minutes, 30 minutes ago
-    roc2 = getRateOfChange(samples, i, 30, 60, grid)
-    if roc2 is None:
-        return None
-    # Add rate of change over last 60 minutes, 60 minutes ago
-    roc3 = getRateOfChange(samples, i, 60, 60, grid)
-    if roc3 is None:
-        return None
-    # Add a rate of change in rate of change over the last 60 minutes
-    roc4 = getSecondRateOfChange(samples, i, 0, 60, 60, grid)
-    if roc4 is None:
-        return None
-    # Add a rate of change in rate of change over the last 60 minutes,
-    # 10 minutes ago
-    roc5 = getSecondRateOfChange(samples, i, 10, 60, 60, grid)
-    if roc5 is None:
-        return None
-    return [roc0, roc1, roc2, roc3, roc4]
+    roc0 = current[1] if grid == "pjm" else current[2] # Positive impact
+    features = [roc0]
+    # Add rates of change every fifteen minutes for the last ~3.5 hours
+    for k in range(0, 210, 15):
+        roc = getRateOfChange(samples, i, k, 60, grid)
+        if roc is None:
+            return None
+        features.append(roc)
+    return features
 
 
-def getSamples2(samples, peaks):
+def getSamples(samples, peaks):
     """
     We want features to be the capacity loads at the current,
     5 minutes, 10 minutes, and 15 minutes prior times.
@@ -364,8 +276,8 @@ def getSamples2(samples, peaks):
     while i < len(samples):
         # Set i to a proper value first
         current = samples[i]
-        pjmFeatures = getFeatures2(samples, current, i, "pjm")
-        comedFeatures = getFeatures2(samples, current, i, "comed")
+        pjmFeatures = getFeatures(samples, current, i, "pjm")
+        comedFeatures = getFeatures(samples, current, i, "comed")
         if pjmFeatures is None or comedFeatures is None:
             i += 1
             continue
@@ -380,29 +292,26 @@ def getSamples2(samples, peaks):
     return pjm, pjmLabels, comed, comedLabels
 
 
-def preprocess(inputPath, dataSplit, mode):
+def preprocess(inputPath, dataSplit):
     # First create a list of each entry in the csv
     # while also collecting the peak hours for each day
     samples, peaks = readData(inputPath)
-    print("Initial samples: " + str(len(samples)))
+    print(f"Initial samples: {len(samples)}")
     # Now create training data from the peaks and list of samples
-    if mode == 1:
-        pjm, pjmLabels, comed, comedLabels = getSamples1(samples, peaks)
-    else:
-        pjm, pjmLabels, comed, comedLabels = getSamples2(samples, peaks)
+    pjm, pjmLabels, comed, comedLabels = getSamples(samples, peaks)
 
     # Split data into training and testing data
     pjmTrain, pjmTest = getSplitData(pjm, pjmLabels, dataSplit)
     comedTrain, comedTest = getSplitData(comed, comedLabels, dataSplit)
-    print("Training Samples: " + str(len(pjmTrain)))
-    print("Testing Samples: " + str(len(pjmTest)))
+    print(f"Training Samples: {len(pjmTrain)}")
+    print(f"Testing Samples: {len(pjmTest)}")
     pjmPositive = 0
     comedPositive = 0
     for i in range(0, len(pjmTest)):
         pjmPositive += pjmTest[i][-1]
         comedPositive += comedTest[i][-1]
-    print("PJM positive tests: " + str(pjmPositive))
-    print("Comed positive tests: " + str(comedPositive))
+    print(f"PJM positive tests: {pjmPositive}")
+    print(f"Comed positive tests: {comedPositive}")
 
     # Preprocess features
     trainScalers(pjmTrain[:, :-1], comedTrain[:, :-1])
@@ -420,12 +329,13 @@ def getBestParameters(estimator, parameters, scoring, trainingData):
         search = GridSearchCV(SVC(), parameters, scoring=scoring,
                               error_score="raise")
     else:
-        raise ValueError("Invalid estimator passed to function")
+        raise ValueError(f"Invalid estimator '{estimator}' \
+                         passed to function")
     search = search.fit(trainingData[:, :-1], trainingData[:, -1])
     return search.best_params_
 
 
-def getModelScore(estimator, parameters, scoring, trainingData, testingData):
+def getModelScore(estimator, parameters, trainingData, testingData):
     if estimator == "dtree":
         model = DecisionTreeClassifier(
             max_depth=parameters["max_depth"],
@@ -443,7 +353,8 @@ def getModelScore(estimator, parameters, scoring, trainingData, testingData):
             random_state=SEED,
         )
     else:
-        raise ValueError("Invalid estimator passed to function")
+        raise ValueError(f"Invalid estimator '{estimator}' \
+                         passed to function")
     model = model.fit(trainingData[:, :-1], trainingData[:, -1])
     labels = model.predict(testingData[:, :-1])
     recall = round(recall_score(testingData[:, -1], labels), 3)
@@ -507,10 +418,10 @@ def runDtreeTests(pjmTrain, pjmTest, comedTrain, comedTest):
 def runSvcTests(pjmTrain, pjmTest, comedTrain, comedTest, standardize):
     # Gamma determines how closely it should fit the data
     # with a nonlinear kernel
-    gamma = [0.1, 1, 10, 40, 70, 90, 110]
+    gamma = [0.1, 1, 5, 10]
     # C is the penalty parameter. It controls the tradeoff between
     # smooth boundaries and fitting
-    c = [0.1, 1, 10, 40, 70, 90, 110]
+    c = [0.1, 1, 10]
 
     # Further preprocess the data
     if standardize:
@@ -524,12 +435,12 @@ def runSvcTests(pjmTrain, pjmTest, comedTrain, comedTest, standardize):
     # Test rbf kernel
     svcParameters = {"kernel": ["rbf"], "C": c, "gamma": gamma,
                      "random_state": [SEED]}
-    pjmBestParam = getBestParameters("svc", svcParameters, "recall", pjmTrain)
-    pjmScore = getModelScore("svc", pjmBestParam, "recall", pjmTrain, pjmTest)
+    pjmBestParam = getBestParameters("svc", svcParameters, "f1", pjmTrain)
+    pjmScore = getModelScore("svc", pjmBestParam, pjmTrain, pjmTest)
     comedBestParam = getBestParameters("svc", svcParameters,
-                                       "recall", comedTrain)
+                                       "f1", comedTrain)
     comedScore = getModelScore("svc", comedBestParam,
-                               "recall", comedTrain, comedTest)
+                               comedTrain, comedTest)
     results["svc"] = [[pjmBestParam, pjmScore], [comedBestParam, comedScore]]
 
 
@@ -553,13 +464,6 @@ if __name__ == "__main__":
         help="Percentage of data to be used as test data. Default=0.9",
     )
     parser.add_argument(
-        "-m",
-        dest="mode",
-        type=int,
-        default=2,
-        help="Mode for choosing features. Default=2",
-    )
-    parser.add_argument(
         "-v",
         action="store_true",
         dest="visual",
@@ -577,10 +481,8 @@ if __name__ == "__main__":
         help="Standardize the data for SVC instead of normalize.",
     )
     args = parser.parse_args()
-    if args.mode != 1 and args.mode != 2:
-        raise ValueError("Invalid choice of mode for choosing features")
     pjmTrain, pjmTest, comedTrain, comedTest = preprocess(
-        args.input, args.dataSplit, args.mode
+        args.input, args.dataSplit
     )
     if args.dtree:
         runDtreeTests(pjmTrain, pjmTest, comedTrain, comedTest)
@@ -592,27 +494,25 @@ if __name__ == "__main__":
         pjmBest = results["dtree"][0]
         comedBest = results["dtree"][1]
         print("=" * 40)
-        print("PJM Decision Tree Parameters: " + str(pjmBest[0]))
-        print("Recall: " + str(pjmBest[1][0]) +
-              "\tPrecision: " + str(pjmBest[1][1]))
-        print("Comed Decision Tree Parameters: " + str(comedBest[0]))
+        print(f"PJM Decision Tree Parameters: {pjmBest[0]}")
+        print(f"Recall: {pjmBest[1][0]}\tPrecision: {pjmBest[1][1]}")
+        print(f"Comed Decision Tree Parameters: {comedBest[0]}")
         print(
-            "Recall: " + str(comedBest[1][0]) +
-            "\tPrecision: " + str(comedBest[1][1])
+            f"Recall: {comedBest[1][0]}\tPrecision: {comedBest[1][1]}"
         )
         if args.visual:
             fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(6, 6))
             pjmScores = [
-                "Recall\n" + str(pjmBest[1][0]),
-                "Precision\n" + str(pjmBest[1][1]),
+                f"Recall\n{pjmBest[1][0]}",
+                f"Precision\n{pjmBest[1][1]}",
             ]
             ax[0].title.set_text("PJM Decision Tree")
             ax[0].set_ylim([0, 1.0])
             ax[0].bar(pjmScores, pjmBest[1])
             ax[0].set_xlabel(getParamString(pjmBest[0]))
             comedScores = [
-                "Recall\n" + str(comedBest[1][0]),
-                "Precision\n" + str(comedBest[1][1]),
+                f"Recall\n{comedBest[1][0]}",
+                f"Precision\n{comedBest[1][1]}",
             ]
             ax[1].title.set_text("Comed Decision Tree")
             ax[1].set_ylim([0, 1.0])
@@ -625,13 +525,11 @@ if __name__ == "__main__":
         pjmBest = results["svc"][0]
         comedBest = results["svc"][1]
         print("=" * 40)
-        print("PJM SVC Parameters: " + str(pjmBest[0]))
-        print("Recall: " + str(pjmBest[1][0]) +
-              "\tPrecision: " + str(pjmBest[1][1]))
-        print("Comed SVC Parameters: " + str(comedBest[0]))
+        print(f"PJM SVC Parameters: {pjmBest[0]}")
+        print(f"Recall: {pjmBest[1][0]}\tPrecision: {pjmBest[1][1]}")
+        print(f"Comed SVC Parameters: {comedBest[0]}")
         print(
-            "Recall: " + str(comedBest[1][0]) +
-            "\tPrecision: " + str(comedBest[1][1])
+            f"Recall: {comedBest[1][0]}\tPrecision: {comedBest[1][1]}"
         )
         if args.visual:
             fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(6, 6))
@@ -640,16 +538,16 @@ if __name__ == "__main__":
             else:
                 fig.suptitle("Normalized Data")
             pjmScores = [
-                "Recall\n" + str(pjmBest[1][0]),
-                "Precision\n" + str(pjmBest[1][1]),
+                f"Recall\n{pjmBest[1][0]}",
+                f"Precision\n{pjmBest[1][1]}",
             ]
             ax[0].title.set_text("PJM SVC")
             ax[0].set_ylim([0, 1.0])
             ax[0].bar(pjmScores, pjmBest[1])
             ax[0].set_xlabel(getParamString(pjmBest[0]))
             comedScores = [
-                "Recall\n" + str(comedBest[1][0]),
-                "Precision\n" + str(comedBest[1][1]),
+                f"Recall\n{comedBest[1][0]}",
+                f"Precision\n{comedBest[1][1]}",
             ]
             ax[1].title.set_text("Comed SVC")
             ax[1].set_ylim([0, 1.0])
