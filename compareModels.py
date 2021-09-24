@@ -15,6 +15,7 @@ from sklearn.model_selection import GridSearchCV, train_test_split
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.utils import shuffle
 
 SEED = 343
 SECONDS_PER_HOUR = 60 * 60
@@ -26,6 +27,12 @@ pjmStandardizer = None
 comedStandardizer = None
 # Keep track of all the best parameter results
 results = {}
+# Minimum peak load to be considered good for training data
+PJM_MIN = 140000 # @TODO Current best guess is 130000
+COMED_MIN = 18000 # @TODO Currnet best guess is 18000, maybe try 17,000 or 19,000+
+# Valid hours for training data, inclusive
+START_HOUR = 6
+END_HOUR = 19
 
 
 def getParamString(parameters):
@@ -112,7 +119,7 @@ def getRateOfChange(samples, i, deltaMinutes, span, grid):
         if previous[0] == target:
             # Found the sample at which we want a rate of change
             current = previous
-            avgLoad1 = getAverageLoad(samples, j, 0, 20, grid)
+            avgLoad1 = getAverageLoad(samples, j, 0, 30, grid)
             delta = timedelta(minutes=span)
             target = current[0] - delta
             for k in range(j - 1, -1, -1):
@@ -120,9 +127,43 @@ def getRateOfChange(samples, i, deltaMinutes, span, grid):
                 if previous[0] < target:
                     return None
                 if previous[0] == target:
-                    avgLoad2 = getAverageLoad(samples, k, 0, 20, grid)
+                    avgLoad2 = getAverageLoad(samples, k, 0, 30, grid)
                     return (avgLoad1 - avgLoad2) / span
             return None
+    return None
+
+
+def getSecondRateOfChange(samples, i, deltaMinutes, span, spanRoc, grid):
+    """
+    Determines the rate of change in the rate of change at sample
+    deltaMinutes before sample i
+    @param samples: the list of samples
+    @param i: index in samples for the current time
+    @param deltaMinutes: minutes prior to sample i that we want to calculate
+    the roc of the roc
+    @param span: duration in minutes for calculating the roc of roc\
+    @param span: span fo getRateOfChange function
+    @param grid: "pjm" or "comed"
+    @return the rate of change in rate of change per minute
+    or None if there is no valid rate
+    """
+    delta = timedelta(minutes=deltaMinutes)
+    current = samples[i]
+    target = current[0] - delta
+    for j in range(i, -1, -1):
+        previous = samples[j]
+        if previous[0] < target:
+            return None
+        if previous[0] == target:
+            # Found the sample at which we want a rate of change
+            roc1 = getRateOfChange(samples, j, 0, spanRoc, grid)
+            if roc1 is None:
+                return None
+            roc2 = getRateOfChange(samples, j, span, spanRoc, grid)
+            if roc2 is None:
+                return None
+            # Multiply rate by 100 to make number bigger
+            return (roc1 - roc2) * 100 / span
     return None
 
 
@@ -193,7 +234,8 @@ def readData(inputPath):
         # Record peaks
         if timestamp.date() != currentTimestamp:
             # Save the old day's peak hours if this is a new day
-            peaks[currentTimestamp] = (peakPjm[1], peakComed[1])
+            peaks[currentTimestamp] = (peakPjm[1], peakComed[1],
+                                       peakPjm[0], peakComed[0])
             currentTimestamp = timestamp.date()
             peakPjm = (pjmLoad, timestamp.time())
             peakComed = (comedLoad, timestamp.time())
@@ -206,7 +248,8 @@ def readData(inputPath):
             # Save new comed peak
             peakComed = (comedLoad, timestamp.time())
         line = inputFile.readline()
-    peaks[currentTimestamp] = (peakPjm[1], peakComed[1])
+    peaks[currentTimestamp] = (peakPjm[1], peakComed[1],
+                               peakPjm[0], peakComed[0])
     inputFile.close()
     # Get rid of placeholder peaks or bad data
     del peaks[placeholderTimestamp]
@@ -222,12 +265,12 @@ def readData(inputPath):
         if isBad:
             badPeaks.append(peak)
     goodSamples = []
-    for sample in samples:
-        if sample[0].date() in badPeaks:
-            continue
-        goodSamples.append(sample)
     for peak in badPeaks:
         del peaks[peak]
+    for sample in samples:
+        if sample[0].date() not in peaks:
+            continue
+        goodSamples.append(sample)
     return goodSamples, peaks
 
 
@@ -242,14 +285,15 @@ def trainScalers(pjmFeatures, comedFeatures):
     comedStandardizer = StandardScaler().fit(comedFeatures)
 
 
-def getFeatures(samples, current, i, grid):
+def getFeatures(samples, i, grid):
     """
     Returns a list of the features for sample i
     Return None if there is no valid set of features for this sample
     """
+    current = samples[i]
     roc0 = current[1] if grid == "pjm" else current[2] # Positive impact
     features = [roc0]
-    # Add rates of change every fifteen minutes for the last ~3.5 hours
+    # Add rates of change every fifteen minutes for the last ~3.5 hours (210 minutes)
     for k in range(0, 210, 15):
         roc = getRateOfChange(samples, i, k, 60, grid)
         if roc is None:
@@ -274,25 +318,29 @@ def getSamples(samples, peaks):
     comed = []
     comedLabels = []
     while i < len(samples):
-        # Set i to a proper value first
-        current = samples[i]
-        pjmFeatures = getFeatures(samples, current, i, "pjm")
-        comedFeatures = getFeatures(samples, current, i, "comed")
-        if pjmFeatures is None or comedFeatures is None:
+        current = samples[i][0]
+        if current.hour < START_HOUR or current.hour > END_HOUR:
             i += 1
             continue
-        pjm.append(pjmFeatures)
-        comed.append(comedFeatures)
-        # Create samples with their label
-        pjmLabels.append(isPositive(current[0], peaks, "pjm"))
-        comedLabels.append(isPositive(current[0], peaks, "comed"))
+        # Add pjm sample
+        if peaks[current.date()][2] >= PJM_MIN:
+            pjmFeatures = getFeatures(samples, i, "pjm")
+            if pjmFeatures is not None:
+                pjm.append(pjmFeatures)
+                pjmLabels.append(isPositive(current, peaks, "pjm"))
+        # Add comed sample
+        if peaks[current.date()][3] >= COMED_MIN:
+            comedFeatures = getFeatures(samples, i, "comed")
+            if comedFeatures is not None:
+                comed.append(comedFeatures)
+                comedLabels.append(isPositive(current, peaks, "comed"))
         i += 1
     pjm = np.array(pjm)
     comed = np.array(comed)
     return pjm, pjmLabels, comed, comedLabels
 
 
-def preprocess(inputPath, dataSplit):
+def preprocess(inputPath, dataSplit, testPath):
     # First create a list of each entry in the csv
     # while also collecting the peak hours for each day
     samples, peaks = readData(inputPath)
@@ -300,11 +348,31 @@ def preprocess(inputPath, dataSplit):
     # Now create training data from the peaks and list of samples
     pjm, pjmLabels, comed, comedLabels = getSamples(samples, peaks)
 
-    # Split data into training and testing data
-    pjmTrain, pjmTest = getSplitData(pjm, pjmLabels, dataSplit)
-    comedTrain, comedTest = getSplitData(comed, comedLabels, dataSplit)
-    print(f"Training Samples: {len(pjmTrain)}")
-    print(f"Testing Samples: {len(pjmTest)}")
+    if testPath == "":
+        # Split data into training and testing data
+        pjmTrain, pjmTest = getSplitData(pjm, pjmLabels, dataSplit)
+        comedTrain, comedTest = getSplitData(comed, comedLabels, dataSplit)
+    else:
+        # Load separate csv file for testing data
+        pjmLabels = np.reshape(pjmLabels, (-1, 1))
+        pjmTrain = np.concatenate((pjm, pjmLabels), axis=1)
+        comedLabels = np.reshape(comedLabels, (-1, 1))
+        comedTrain = np.concatenate((comed, comedLabels), axis=1)
+        
+        samples, peaks = readData(testPath)
+        pjm, pjmLabels, comed, comedLabels = getSamples(samples, peaks)
+        pjmLabels = np.reshape(pjmLabels, (-1, 1))
+        pjmTest = np.concatenate((pjm, pjmLabels), axis=1)
+        comedLabels = np.reshape(comedLabels, (-1, 1))
+        comedTest = np.concatenate((comed, comedLabels), axis=1)
+        
+        pjmTrain = shuffle(pjmTrain, random_state=SEED)
+        pjmTest = shuffle(pjmTest, random_state=SEED)
+        comedTrain = shuffle(comedTrain, random_state=SEED)
+        comedTest = shuffle(comedTest, random_state=SEED)
+
+    print(f"PJM training samples: {len(pjmTrain)}")
+    print(f"Comed training samples: {len(comedTrain)}")
     pjmPositive = 0
     comedPositive = 0
     for i in range(0, len(pjmTest)):
@@ -403,14 +471,15 @@ def runDtreeTests(pjmTrain, pjmTest, comedTrain, comedTest):
     }
 
     # Test for prioritizing recall
+    scoring = "recall"
     pjmBestParam = getBestParameters("dtree", dtreeParameters,
-                                     "recall", pjmTrain)
+                                     scoring, pjmTrain)
     pjmScore = getModelScore("dtree", pjmBestParam,
-                             "recall", pjmTrain, pjmTest)
+                             pjmTrain, pjmTest)
     comedBestParam = getBestParameters("dtree", dtreeParameters,
-                                       "recall", comedTrain)
+                                       scoring, comedTrain)
     comedScore = getModelScore("dtree", comedBestParam,
-                               "recall", comedTrain, comedTest)
+                               comedTrain, comedTest)
     results["dtree"] = [[pjmBestParam, pjmScore],
                         [comedBestParam, comedScore]]
 
@@ -458,6 +527,14 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-t",
+        dest="test",
+        type=str,
+        default="",
+        help="Path to csv file to use as separate testing data. \
+              Splits training data by default",
+    )
+    parser.add_argument(
+        "-x",
         dest="dataSplit",
         type=float,
         default=0.9,
@@ -482,7 +559,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     pjmTrain, pjmTest, comedTrain, comedTest = preprocess(
-        args.input, args.dataSplit
+        args.input, args.dataSplit, args.test
     )
     if args.dtree:
         runDtreeTests(pjmTrain, pjmTest, comedTrain, comedTest)

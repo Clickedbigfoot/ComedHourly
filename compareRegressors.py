@@ -17,10 +17,12 @@ from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.svm import SVR
 from sklearn.tree import DecisionTreeRegressor
+from sklearn.utils import shuffle
 
 from compareModels import getAverageLoad, getDatetimeFromTimestamp, \
                           getFeatures, getParamString, getRateOfChange, \
                           getSplitData, readData, scaleData
+from compareModels import COMED_MIN, PJM_MIN
 
 
 SEED = 343
@@ -38,8 +40,14 @@ results = {}
 
 def getTimeUntilPeak(currentTimestamp, peaks, grid):
     if grid == "pjm":
+        peakLoad = peaks[currentTimestamp.date()][2]
+        if peakLoad < PJM_MIN:
+            return -1
         peakTime = peaks[currentTimestamp.date()][0]
     elif grid == "comed":
+        peakLoad = peaks[currentTimestamp.date()][3]
+        if peakLoad < COMED_MIN:
+            return -1
         peakTime = peaks[currentTimestamp.date()][1]
     else:
         raise ValueError("Invalid electricity grid specified in arguments")
@@ -74,19 +82,18 @@ def getSamples(samples, peaks):
     comed = []
     comedLabels = []
     while i < len(samples):
-        # Set i to a proper value first
-        current = samples[i]
-        # @TODO We need to make sure that we don't throw away a good pjm datapoint just because
-        # it's too far from a comed peak, and vice versa
-        pjmCountdown = getTimeUntilPeak(current[0], peaks, "pjm")
+        current = samples[i][0]
+        # Add pjm sample
+        pjmCountdown = getTimeUntilPeak(current, peaks, "pjm")
         if 0 <= pjmCountdown and pjmCountdown <= 90:
-            pjmFeatures = getFeatures(samples, current, i, "pjm")
+            pjmFeatures = getFeatures(samples, i, "pjm")
             if pjmFeatures is not None:
                 pjm.append(pjmFeatures)
                 pjmLabels.append(pjmCountdown)
-        comedCountdown = getTimeUntilPeak(current[0], peaks, "comed")
+        # Add comed sample
+        comedCountdown = getTimeUntilPeak(current, peaks, "comed")
         if 0 <= comedCountdown and comedCountdown <= 90:
-            comedFeatures = getFeatures(samples, current, i, "comed")
+            comedFeatures = getFeatures(samples, i, "comed")
             if comedFeatures is not None:
                 comed.append(comedFeatures)
                 comedLabels.append(comedCountdown)
@@ -96,7 +103,7 @@ def getSamples(samples, peaks):
     return pjm, pjmLabels, comed, comedLabels
 
 
-def preprocess(inputPath, dataSplit):
+def preprocess(inputPath, dataSplit, testPath):
     # First create a list of each entry in the csv
     # while also collecting the peak hours for each day
     samples, peaks = readData(inputPath)
@@ -104,9 +111,29 @@ def preprocess(inputPath, dataSplit):
     # Now create training data from the peaks and list of samples
     pjm, pjmLabels, comed, comedLabels = getSamples(samples, peaks)
 
-    # Split data into training and testing data
-    pjmTrain, pjmTest = getSplitData(pjm, pjmLabels, dataSplit)
-    comedTrain, comedTest = getSplitData(comed, comedLabels, dataSplit)
+    if testPath == "":
+        # Split data into training and testing data
+        pjmTrain, pjmTest = getSplitData(pjm, pjmLabels, dataSplit)
+        comedTrain, comedTest = getSplitData(comed, comedLabels, dataSplit)
+    else:
+        # Load separate csv file for testing data
+        pjmLabels = np.reshape(pjmLabels, (-1, 1))
+        pjmTrain = np.concatenate((pjm, pjmLabels), axis=1)
+        comedLabels = np.reshape(comedLabels, (-1, 1))
+        comedTrain = np.concatenate((comed, comedLabels), axis=1)
+        
+        samples, peaks = readData(testPath)
+        pjm, pjmLabels, comed, comedLabels = getSamples(samples, peaks)
+        pjmLabels = np.reshape(pjmLabels, (-1, 1))
+        pjmTest = np.concatenate((pjm, pjmLabels), axis=1)
+        comedLabels = np.reshape(comedLabels, (-1, 1))
+        comedTest = np.concatenate((comed, comedLabels), axis=1)
+        
+        pjmTrain = shuffle(pjmTrain, random_state=SEED)
+        pjmTest = shuffle(pjmTest, random_state=SEED)
+        comedTrain = shuffle(comedTrain, random_state=SEED)
+        comedTest = shuffle(comedTest, random_state=SEED)
+    
     print("PJM Training Samples: " + str(len(pjmTrain)))
     print("PJM Testing Samples: " + str(len(pjmTest)))
     print("Comed Training Samples: " + str(len(comedTrain)))
@@ -207,10 +234,11 @@ def runDtreeTests(pjmTrain, pjmTest, comedTrain, comedTest):
 def runSvrTests(pjmTrain, pjmTest, comedTrain, comedTest, standardize):
     # Gamma determines how closely it should fit the data
     # with a nonlinear kernel
-    gamma = [0.1, 0.5, 1, 1.5, 5, 10, 20, 30, 40, 50]
+    gamma = [0.1, 0.5, 1, 1.5, 2.5, 5]
     # C is the penalty parameter. It controls the tradeoff between
     # smooth boundaries and fitting
-    c = [0.1, 0.5, 1, 1.5, 5, 10, 20, 30]
+    c = [0.1, 1, 5, 10, 15, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+    #c = c[:-7] #-7 to get rid of all after 30
 
     # Further preprocess the data
     if standardize:
@@ -245,11 +273,19 @@ if __name__ == "__main__":
         help="Path to the data to use.",
     )
     parser.add_argument(
-        "-t",
+        "-x",
         dest="dataSplit",
         type=float,
         default=0.9,
         help="Percentage of data to be used as test data. Default=0.9",
+    )
+    parser.add_argument(
+        "-t",
+        dest="test",
+        type=str,
+        default="",
+        help="Path to csv file to use as separate testing data. \
+              Splits training data by default",
     )
     parser.add_argument(
         "-v",
@@ -270,7 +306,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     pjmTrain, pjmTest, comedTrain, comedTest = preprocess(
-        args.input, args.dataSplit,
+        args.input, args.dataSplit, args.test
     )
     if args.dtree:
         runDtreeTests(pjmTrain, pjmTest, comedTrain, comedTest)
