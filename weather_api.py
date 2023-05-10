@@ -284,9 +284,8 @@ class WeatherApi():
 
 
 if __name__ == '__main__':
-    from API_KEY import API_KEY
-    api_key = API_KEY
-    api = WeatherApi(api_key)
+    import os
+    api = WeatherApi(os.environ['WEATHER_API_KEY'])
     try:
         answer = api.get_current_weather(('temperature', 'humidity'))
     except UnexpectedResponseError as e:

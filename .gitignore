@@ -4,7 +4,6 @@ CheckUsage/config.txt
 CheckUsage/*.exe
 CheckUsage/*.pdb
 usageData.csv
+__pycache__/
 venv/
-
-# Small brain time
-API_KEY.py
+.env
