@@ -40,3 +40,14 @@ LOADS_TABLE_COLUMNS = {'sample_id': {'datatype': 'integer unique'},
                        'pjm': {'datatype': 'integer'}}
 
 SAMPLES_TABLE_COLUMNS = {'unix_timestamp': {'datatype': 'integer unique'}}
+
+# This determines how stale the data can be when collecting current
+# weather data
+TOLERANCE = 7  # 7 minutes
+
+# This determines extra seconds we will wait before collecting data to
+# give the data sources a chance to update in time
+GRACE_PERIOD = 60  # 1 minute
+
+# File to which we log stuff
+LOG_FILE = '/var/log/monitor_electricityd.log'

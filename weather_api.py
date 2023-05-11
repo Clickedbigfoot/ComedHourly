@@ -53,7 +53,7 @@ class UnexpectedResponseError(Exception):
 class StaleDataError(Exception):
     """Raise when get_current_weather() gets info that is too old."""
 
-    def __init__(self, tolerance, difference, current):
+    def __init__(self, tolerance, last_update, current):
         """
         Initialize error.
 
@@ -64,11 +64,11 @@ class StaleDataError(Exception):
             the api response
         """
         self.tolerance = tolerance
-        self.difference = difference
+        self.last_update
         self.current = current
-        n_minutes = (difference.seconds // 60) + difference.days * 1440
-        self.message = ('tolerance of {} minutes exceeded by {} '
-                        'minutes'.format(tolerance, n_minutes - tolerance))
+        last_update_str = self.last_update.strftime('%y-%m-%d %H:%M')
+        self.message = ('update at {} exceeds tolerance of {} '
+                        'minutes'.format(last_update_str, tolerance))
         super().__init__(self.message)
 
 
