@@ -8,6 +8,7 @@ of the data stored in SQL.
 Intended usage here will be with Sqlite3 database.
 """
 import consts
+import copy
 import datetime
 import os
 import sqlalchemy
@@ -38,14 +39,16 @@ class SqlDbError(Exception):
 class SqlIO():
     """Facilitate SQL operations."""
 
-    def __init__(self, path_to_db, create=False):
+    def __init__(self, path_to_db, create=False, echo=False):
         """
         Initialize instance fields.
 
         @param path_to_db: string path to the database
         @param create: whether or not to create a database if it does not
             exist. If True, this will update the schema of any existing
-            database at the specified path. If False
+            database at the specified path. If False, this raises an error
+        @param echo: if all sql operations are logged and printed to
+            stdout (Both)
         """
         # Save list of valid areas
         self.areas = set([area[0] for area in consts.AREAS])
@@ -58,7 +61,7 @@ class SqlIO():
 
         # Create engine to interface with database
         self.eng = sqlalchemy.create_engine('sqlite:///{}'.format(
-            path_to_db), echo=True)
+            path_to_db), echo=echo)
 
         # Create db if necessary
         self.verify_db(create)
@@ -75,6 +78,8 @@ class SqlIO():
             source as the key as defined in consts.LOADS_TABLE_COLUMNS
             (Ex: {'comed': 9000})
         """
+        values = copy.deepcopy(values)
+
         # Verify parameter types
         if not isinstance(sample_time, datetime.datetime):
             raise TypeError('sample_time must be datetime object')
@@ -97,6 +102,8 @@ class SqlIO():
             Columns and values must match what's defined in
             consts.LOCATION_TABLE_COLUMNS
         """
+        values = copy.deepcopy(values)
+
         # Verify parameter types
         if not isinstance(sample_time, datetime.datetime):
             raise TypeError('sample_time must be datetime object')
@@ -226,6 +233,11 @@ class SqlIO():
                                                    table))
 
         # Create missing tables
+        if not create and len(expected_tables) > 0:
+            # Not allowed to create, raise issue
+            raise ExistentialError('missing tables {}, create=False'.format(
+                expected_tables))
+
         for table in expected_tables:
 
             # Determine columns to use
@@ -245,7 +257,6 @@ class SqlIO():
                     columns[column]['datatype'])
             create_string += ')'
             self.execute(create_string)
-            exit()
 
     def execute(self, query):
         """
