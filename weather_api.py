@@ -17,19 +17,25 @@ import requests
 BASE_URL = "http://api.weatherapi.com/v1"
 
 class RequestError(Exception):
-    """Raise when an HTTP error is returned."""
+    """Raise when an error occurs during an api request."""
 
-    def __init__(self, http_code, api_code=None, msg=None):
+    def __init__(self, http_code=None, api_code=None, msg=None):
         """
         Initialize error.
 
-        @param http_code: int representing http error code
+        @param http_code: int representing http error code if any
         @param api_code: string of api error code if any is returned
-        @param msg: error message returned by API if any
+        @param msg: error message returned by API if any, or other
+            error message
         """
         self.http_code = http_code
         self.api_code = api_code
-        self.message = msg if msg else 'http error {}'.format(http_code)
+        if msg is not None:
+            self.message = msg
+        elif http_code is not None:
+            self.message = 'http error {}'.format(http_code)
+        else:
+            self.message = 'error when making api request'
         super().__init__(self.message)
 
 
@@ -53,21 +59,24 @@ class UnexpectedResponseError(Exception):
 class StaleDataError(Exception):
     """Raise when get_current_weather() gets info that is too old."""
 
-    def __init__(self, tolerance, last_update, current):
+    def __init__(self, tolerance, last_update, current, ret_info):
         """
         Initialize error.
 
         @param tolerance: int maximum number of minutes old that the
             data can be.
-        @param timedelta object representing current time - data's time
+        @param last_update: datetime object for the data's last update
         @param current: dictionary representing Current json object from
             the api response
+        @param ret_info: the information that would normally be returned
+            by the method
         """
         self.tolerance = tolerance
-        self.last_update
+        self.last_update = last_update
         self.current = current
+        self.ret_info = ret_info
         last_update_str = self.last_update.strftime('%y-%m-%d %H:%M')
-        self.message = ('update at {} exceeds tolerance of {} '
+        self.message = ('update at {} UTC exceeds tolerance of {} '
                         'minutes'.format(last_update_str, tolerance))
         super().__init__(self.message)
 
@@ -159,24 +168,28 @@ class WeatherApi():
             # Convert json to dictionary
             json = response.json()
 
+            # Extract temperature and location
+            ret_info = {}
+            for i in range(0, len(targets)):
+                ret_info[info[i]] = json['current'][targets[i]]
+
             # Check to see if data is too old
             last_updated = datetime.datetime.fromtimestamp(
                 int(json['current']['last_updated_epoch']),
                 datetime.timezone.utc)
             difference = now - last_updated
             if now - last_updated > tolerance_td:
-                raise StaleDataError(tolerance, difference, json['current'])
+                raise StaleDataError(tolerance,
+                                     last_updated,
+                                     json['current'],
+                                     ret_info)
 
-            # Return temperature and location
-            ret_info = {}
-            for i in range(0, len(targets)):
-                ret_info[info[i]] = json['current'][targets[i]]
             return (ret_info, json['location'])
 
         except StaleDataError as e:
             # So that this isn't caught and misreported below
             raise e
-        except Exception:
+        except Exception as e:
             raise UnexpectedResponseError(text=response.text)
 
     # @TODO finish this function
@@ -262,7 +275,11 @@ class WeatherApi():
             payload[key] = kwargs[key]
 
         # Make request
-        response = requests.get(url, params=payload)
+        try:
+            response = requests.get(url, params=payload)
+        except Exception as e:
+            raise RequestError(msg=str(e))
+
         if response.status_code != 200:
             # Check 404 first
             if response.status_code == 404:

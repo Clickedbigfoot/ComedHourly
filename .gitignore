@@ -7,3 +7,4 @@ usageData.csv
 __pycache__/
 venv/
 .env
+*.db
